@@ -115,19 +115,14 @@ final class RTMPNWSocket: RTMPSocketCompatible {
         
         while let info = current {
             if info.pointee.ai_family == AF_INET6 {
-                let storage = UnsafeMutablePointer<sockaddr_storage>.allocate(capacity: 1)
-                defer { storage.deallocate() }
-                
-                storage.pointee = sockaddr_storage()
-                memcpy(storage, info.pointee.ai_addr, Int(info.pointee.ai_addrlen))
-                
-                let sockaddrIn6 = storage.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { $0.pointee }
-                var addressBuffer = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
-                
-                if inet_ntop(AF_INET6, &sockaddrIn6.sin6_addr, &addressBuffer, socklen_t(INET6_ADDRSTRLEN)) != nil {
-                    resolvedAddress = String(cString: addressBuffer)
-                    break
+                info.pointee.ai_addr.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { sockaddrIn6Ptr in
+                    var addressBuffer = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
+                    
+                    if inet_ntop(AF_INET6, &sockaddrIn6Ptr.pointee.sin6_addr, &addressBuffer, socklen_t(INET6_ADDRSTRLEN)) != nil {
+                        resolvedAddress = String(cString: addressBuffer)
+                    }
                 }
+                break
             }
             current = info.pointee.ai_next
         }
