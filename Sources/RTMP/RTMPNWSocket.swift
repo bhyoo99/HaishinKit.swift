@@ -71,7 +71,10 @@ final class RTMPNWSocket: RTMPSocketCompatible {
         totalBytesOut.mutate { $0 = 0 }
         queueBytesOut.mutate { $0 = 0 }
         inputBuffer.removeAll(keepingCapacity: false)
-        connection = NWConnection(to: NWEndpoint.hostPort(host: .init(withName), port: .init(integerLiteral: NWEndpoint.Port.IntegerLiteralType(port))), using: parameters)
+        
+        let resolvedHost = resolveHostWithIPv6Support(withName, port: port)
+        
+        connection = NWConnection(to: NWEndpoint.hostPort(host: .init(resolvedHost), port: .init(integerLiteral: NWEndpoint.Port.IntegerLiteralType(port))), using: parameters)
         connection?.viabilityUpdateHandler = viabilityDidChange(to:)
         connection?.stateUpdateHandler = stateDidChange(to:)
         connection?.start(queue: networkQueue)
@@ -88,6 +91,48 @@ final class RTMPNWSocket: RTMPSocketCompatible {
             timeoutHandler = newTimeoutHandler
             DispatchQueue.global(qos: .userInteractive).asyncAfter(deadline: .now() + .seconds(timeout), execute: newTimeoutHandler)
         }
+    }
+    
+    private func resolveHostWithIPv6Support(_ host: String, port: Int) -> String {
+        var hints = addrinfo()
+        hints.ai_family = AF_UNSPEC
+        hints.ai_socktype = SOCK_STREAM
+        hints.ai_flags = AI_V4MAPPED | AI_ALL
+        
+        var result: UnsafeMutablePointer<addrinfo>?
+        let portString = String(port)
+        
+        guard getaddrinfo(host, portString, &hints, &result) == 0 else {
+            return host
+        }
+        
+        defer {
+            freeaddrinfo(result)
+        }
+        
+        var resolvedAddress = host
+        var current = result
+        
+        while let info = current {
+            if info.pointee.ai_family == AF_INET6 {
+                let storage = UnsafeMutablePointer<sockaddr_storage>.allocate(capacity: 1)
+                defer { storage.deallocate() }
+                
+                storage.pointee = sockaddr_storage()
+                memcpy(storage, info.pointee.ai_addr, Int(info.pointee.ai_addrlen))
+                
+                let sockaddrIn6 = storage.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { $0.pointee }
+                var addressBuffer = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
+                
+                if inet_ntop(AF_INET6, &sockaddrIn6.sin6_addr, &addressBuffer, socklen_t(INET6_ADDRSTRLEN)) != nil {
+                    resolvedAddress = String(cString: addressBuffer)
+                    break
+                }
+            }
+            current = info.pointee.ai_next
+        }
+        
+        return resolvedAddress
     }
 
     func close(isDisconnected: Bool) {
