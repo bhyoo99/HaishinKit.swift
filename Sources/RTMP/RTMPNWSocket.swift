@@ -100,34 +100,24 @@ final class RTMPNWSocket: RTMPSocketCompatible {
         hints.ai_flags = AI_V4MAPPED | AI_ALL
         
         var result: UnsafeMutablePointer<addrinfo>?
-        let portString = String(port)
-        
-        guard getaddrinfo(host, portString, &hints, &result) == 0 else {
+        guard getaddrinfo(host, String(port), &hints, &result) == 0 else {
             return host
         }
+        defer { freeaddrinfo(result) }
         
-        defer {
-            freeaddrinfo(result)
-        }
-        
-        var resolvedAddress = host
         var current = result
-        
         while let info = current {
             if info.pointee.ai_family == AF_INET6 {
-                info.pointee.ai_addr.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { sockaddrIn6Ptr in
-                    var addressBuffer = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
-                    
-                    if inet_ntop(AF_INET6, &sockaddrIn6Ptr.pointee.sin6_addr, &addressBuffer, socklen_t(INET6_ADDRSTRLEN)) != nil {
-                        resolvedAddress = String(cString: addressBuffer)
-                    }
+                var addressBuffer = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
+                info.pointee.ai_addr.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { ptr in
+                    _ = inet_ntop(AF_INET6, &ptr.pointee.sin6_addr, &addressBuffer, socklen_t(INET6_ADDRSTRLEN))
                 }
-                break
+                return String(cString: addressBuffer)
             }
             current = info.pointee.ai_next
         }
         
-        return resolvedAddress
+        return host
     }
 
     func close(isDisconnected: Bool) {
